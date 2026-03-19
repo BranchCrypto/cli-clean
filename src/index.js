@@ -8,62 +8,69 @@
 const { Command } = require('commander');
 const chalk = require('chalk');
 const ora = require('ora');
+const figlet = require('figlet');
 
 const { scanAllCLIs, searchCLIs, getStatsBySource } = require('./modules/scanner');
 const { analyzeRelatedFiles, getRelatedSummary } = require('./modules/analyzer');
 const { normalDelete, forceDelete, safetyCheck } = require('./modules/remover');
 const ui = require('./modules/ui');
 const logger = require('./utils/logger');
+const { t, setLocale, detectLocale } = require('./utils/i18n');
 
 const program = new Command();
 
 // ===== Banner =====
 function showBanner() {
+  const asciiText = figlet.textSync('CLI-CLEAN', {
+    font: 'Standard',
+    horizontalLayout: 'default',
+    verticalLayout: 'default',
+  });
   console.log();
-  console.log(chalk.cyan.bold('  ╔══════════════════════════════════════════╗'));
-  console.log(chalk.cyan.bold('  ║                                          ║'));
-  console.log(chalk.cyan.bold('  ║') + chalk.white.bold('       🔧 CLI-CLEAN v1.0.0              ') + chalk.cyan.bold('║'));
-  console.log(chalk.cyan.bold('  ║') + chalk.gray('       本地 CLI 清理工具                 ') + chalk.cyan.bold('║'));
-  console.log(chalk.cyan.bold('  ║                                          ║'));
-  console.log(chalk.cyan.bold('  ╚══════════════════════════════════════════╝'));
+  console.log(chalk.cyan.bold(asciiText));
+  console.log(chalk.gray(`  ${t('banner.subtitle')}  v1.0.0`));
+  console.log(chalk.cyan('  ' + '─'.repeat(42)));
   console.log();
 }
 
 // ===== 扫描 CLI 列表 =====
 async function getCLIList(keyword, options = {}) {
-  const spinner = ora('正在扫描本机 CLI 工具...').start();
+  const spinner = ora(t('scanner.scanning')).start();
   try {
     let cliList;
     if (keyword) {
       cliList = await searchCLIs(keyword, options);
       if (cliList.length === 0) {
-        spinner.fail(`未找到与 "${keyword}" 相关的 CLI`);
+        spinner.fail(t('scanner.notFound', { keyword }));
         return null;
       }
-      spinner.succeed(`找到 ${cliList.length} 个匹配的 CLI`);
+      spinner.succeed(t('scanner.foundMatches', { count: cliList.length }));
     } else {
       cliList = await scanAllCLIs(options);
-      spinner.succeed(`共发现 ${cliList.length} 个 CLI 工具`);
+      spinner.succeed(t('scanner.totalFound', { count: cliList.length }));
     }
     return cliList;
   } catch (err) {
-    spinner.fail('扫描失败: ' + err.message);
+    spinner.fail(t('scanner.scanFailed', { error: err.message }));
     return null;
   }
 }
 
 // ===== 命令: 交互式模式 =====
 async function interactiveMode() {
-  showBanner();
+  let cachedList = null;
 
   while (true) {
+    showBanner();
+
     const action = await ui.mainMenu();
 
     switch (action) {
       case 'search': {
         const keyword = await ui.askSearchKeyword();
         if (!keyword) {
-          logger.warn('请输入搜索关键词');
+          logger.warn(t('error.enterKeyword'));
+          await pressEnterToContinue();
           break;
         }
         const cliList = await getCLIList(keyword);
@@ -72,8 +79,9 @@ async function interactiveMode() {
         let page = 1;
         while (true) {
           console.clear();
-          logger.info(`搜索 "${keyword}" 的结果 (${cliList.length} 个):`);
+          logger.info(t('action.searchResults', { keyword, count: cliList.length }));
           const { totalPages, currentPage } = ui.displayCLIList(cliList, page);
+          ui.printStatusBar(cliList, t('menu.search'));
 
           const nav = await ui.askPageNavigation(currentPage, totalPages);
           if (nav === 'back') break;
@@ -85,14 +93,19 @@ async function interactiveMode() {
       }
 
       case 'list': {
-        const cliList = await getCLIList();
-        if (!cliList) break;
+        // 缓存扫描结果，避免重复扫描
+        if (!cachedList) {
+          const spinner = ora(t('scanner.scanning')).start();
+          cachedList = await scanAllCLIs();
+          spinner.succeed(t('scanner.totalFound', { count: cachedList.length }));
+        }
 
         let page = 1;
         while (true) {
           console.clear();
-          logger.info('本机全部 CLI 列表:');
-          const { totalPages, currentPage } = ui.displayCLIList(cliList, page);
+          logger.info(t('action.fullList'));
+          const { totalPages, currentPage } = ui.displayCLIList(cachedList, page);
+          ui.printStatusBar(cachedList, t('menu.list'));
 
           const nav = await ui.askPageNavigation(currentPage, totalPages);
           if (nav === 'back') break;
@@ -108,7 +121,9 @@ async function interactiveMode() {
         if (!cliList) break;
 
         console.clear();
+        showBanner();
         ui.displayStats(cliList);
+        ui.printStatusBar(cliList, t('menu.stats'));
         await pressEnterToContinue();
         break;
       }
@@ -117,16 +132,15 @@ async function interactiveMode() {
         const cliList = await getCLIList();
         if (!cliList) break;
 
-        // 选择要删除的 CLI
-        const selected = await ui.selectCLIs(cliList, '选择要删除的 CLI（空格多选，回车确认）');
+        const selected = await ui.selectCLIs(cliList, t('ui.selectCLIs'));
         if (selected.length === 0) {
-          logger.warn('未选择任何 CLI');
+          logger.warn(t('error.noSelection'));
+          await pressEnterToContinue();
           break;
         }
 
-        // 显示选中的 CLI 详情
         console.clear();
-        logger.title('已选择的 CLI');
+        logger.title(t('action.selectedCLIs'));
         for (const cli of selected) {
           const warnings = safetyCheck(cli);
           if (warnings.length > 0) {
@@ -136,46 +150,44 @@ async function interactiveMode() {
           console.log();
         }
 
-        // 选择删除模式
         const mode = await ui.selectDeleteMode();
         if (mode === 'cancel') {
-          logger.info('已取消删除操作');
+          logger.info(t('action.cancelled'));
+          await pressEnterToContinue();
           break;
         }
 
-        // 如果是强力删除，先分析关联文件并展示
         let relatedMap = {};
         if (mode === 'force') {
-          const spinner = ora('正在分析关联文件...').start();
+          const spinner = ora(t('action.analyzing')).start();
           for (const cli of selected) {
             relatedMap[cli.name] = analyzeRelatedFiles(cli);
           }
-          spinner.succeed('关联文件分析完成');
+          spinner.succeed(t('action.analyzeDone'));
 
           console.clear();
-          logger.title('强力删除预览 - 关联文件');
+          logger.title(t('action.forcePreviewTitle'));
           for (const cli of selected) {
             const related = relatedMap[cli.name];
             ui.displayCLIDetail(cli, related);
             console.log();
           }
-          logger.warn('⚠️  共享目录（标红）不会被删除，以防止影响其他工具');
+          logger.warn(t('ui.sharedDirWarning'));
         }
 
-        // 确认删除
         const confirmed = await ui.confirmDelete(selected, mode);
         if (!confirmed) {
-          logger.info('已取消删除操作');
+          logger.info(t('action.cancelled'));
+          await pressEnterToContinue();
           break;
         }
 
-        // 执行删除
         console.clear();
-        logger.title(mode === 'force' ? '💥 执行强力删除' : '🗑  执行普通删除');
+        logger.title(mode === 'force' ? t('ui.deleteForceTitle') : t('ui.deleteNormalTitle'));
 
         let allResults = { deleted: [], cleaned: [], failed: [] };
         for (const cli of selected) {
-          logger.subtitle(`处理: ${cli.name}`);
+          logger.subtitle(t('ui.processing', { name: cli.name }));
           let result;
           if (mode === 'force') {
             result = await forceDelete(cli, relatedMap[cli.name]);
@@ -187,15 +199,22 @@ async function interactiveMode() {
           allResults.failed.push(...(result.failed || []));
         }
 
-        // 显示结果
         ui.displayDeleteResult(allResults);
         await pressEnterToContinue();
+
+        // 删除后清除缓存，让下次扫描拿到最新结果
+        cachedList = null;
         break;
       }
 
       case 'exit': {
-        logger.info('感谢使用 CLI-Clean，再见！👋');
-        process.exit(0);
+        const confirmed = await ui.confirmExit();
+        if (confirmed) {
+          console.log();
+          logger.info(t('action.exitMsg'));
+          process.exit(0);
+        }
+        break;
       }
     }
   }
@@ -216,7 +235,7 @@ program
     if (opts.source) {
       cliList = cliList.filter(cli => cli.source === opts.source);
       if (cliList.length === 0) {
-        logger.warn(`未找到来源为 "${opts.source}" 的 CLI`);
+        logger.warn(t('error.sourceNotFound', { source: opts.source }));
         return;
       }
     }
@@ -269,16 +288,16 @@ program
 
     const cli = cliList.find(c => c.name.toLowerCase() === name.toLowerCase());
     if (!cli) {
-      logger.error(`未找到 CLI: ${name}`);
+      logger.error(t('error.cliNotFound', { name }));
       return;
     }
 
     showBanner();
     let related = null;
     if (opts.analyze) {
-      const spinner = ora('正在分析关联文件...').start();
+      const spinner = ora(t('action.analyzing')).start();
       related = analyzeRelatedFiles(cli);
-      spinner.succeed('分析完成');
+      spinner.succeed(t('action.analyzingShort'));
     }
     ui.displayCLIDetail(cli, related);
   });
@@ -300,31 +319,29 @@ program
       if (cli) {
         toDelete.push(cli);
       } else {
-        logger.error(`未找到 CLI: ${name}`);
+        logger.error(t('error.cliNotFound', { name }));
       }
     }
 
     if (toDelete.length === 0) {
-      logger.warn('没有找到任何匹配的 CLI');
+      logger.warn(t('error.noMatch'));
       return;
     }
 
     showBanner();
 
-    // 安全检查
     for (const cli of toDelete) {
       const warnings = safetyCheck(cli);
       for (const w of warnings) logger.warn(w);
     }
 
-    // 显示详情
     let relatedMap = {};
     if (opts.force) {
-      const spinner = ora('正在分析关联文件...').start();
+      const spinner = ora(t('action.analyzing')).start();
       for (const cli of toDelete) {
         relatedMap[cli.name] = analyzeRelatedFiles(cli);
       }
-      spinner.succeed('分析完成');
+      spinner.succeed(t('action.analyzingShort'));
 
       for (const cli of toDelete) {
         ui.displayCLIDetail(cli, relatedMap[cli.name]);
@@ -337,21 +354,19 @@ program
       }
     }
 
-    // 确认
     const mode = opts.force ? 'force' : 'normal';
     if (!opts.yes) {
       const confirmed = await ui.confirmDelete(toDelete, mode);
       if (!confirmed) {
-        logger.info('已取消');
+        logger.info(t('action.cancelledShort'));
         return;
       }
     }
 
-    // 执行删除
-    logger.title(opts.force ? '💥 执行强力删除' : '🗑  执行普通删除');
+    logger.title(opts.force ? t('ui.deleteForceTitle') : t('ui.deleteNormalTitle'));
     let allResults = { deleted: [], cleaned: [], failed: [] };
     for (const cli of toDelete) {
-      logger.subtitle(`处理: ${cli.name}`);
+      logger.subtitle(t('ui.processing', { name: cli.name }));
       let result;
       if (opts.force) {
         result = await forceDelete(cli, relatedMap[cli.name]);
@@ -390,7 +405,7 @@ async function pressEnterToContinue() {
     {
       type: 'input',
       name: 'continue',
-      message: chalk.gray('按 Enter 键继续...'),
+      message: chalk.gray(t('prompt.enterToContinue')),
     },
   ]);
 }
@@ -399,6 +414,21 @@ async function pressEnterToContinue() {
 program
   .name('cli-clean')
   .description('本地 CLI 清理工具 - 扫描、管理和删除本机 CLI 工具')
-  .version('1.0.0');
+  .version('1.0.0')
+  .option('--lang <locale>', 'Language (zh/en)', (val) => {
+    if (!['zh', 'en'].includes(val)) {
+      console.error('Invalid language. Use zh or en.');
+      process.exit(1);
+    }
+    return val;
+  })
+  .hook('preAction', (cmd) => {
+    const opts = cmd.opts();
+    if (opts.lang) {
+      setLocale(opts.lang);
+    } else {
+      setLocale(detectLocale());
+    }
+  });
 
 program.parse(process.argv);

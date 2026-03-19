@@ -14,11 +14,11 @@ const logger = {
     console.log(chalk.red('✖'), chalk.red(msg));
   },
   title(msg) {
-    const line = '═'.repeat(Math.min(msg.length * 2, 60));
+    const line = '─'.repeat(Math.min(msg.length * 2, 60));
     console.log();
-    console.log(chalk.cyan.bold(line));
-    console.log(chalk.cyan.bold(`  ${msg}`));
-    console.log(chalk.cyan.bold(line));
+    console.log(chalk.cyan.bold(`┌${line}┐`));
+    console.log(chalk.cyan.bold(`│ ${msg} │`));
+    console.log(chalk.cyan.bold(`└${line}┘`));
     console.log();
   },
   subtitle(msg) {
@@ -33,6 +33,9 @@ const logger = {
   },
   blank() {
     console.log();
+  },
+  sectionDivider(char = '─', width = 50) {
+    console.log(chalk.gray(char.repeat(width)));
   },
 };
 

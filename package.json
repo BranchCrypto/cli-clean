@@ -10,13 +10,19 @@
     "start": "node src/index.js",
     "cli-clean": "node src/index.js"
   },
-  "keywords": ["cli", "clean", "manager", "tool"],
+  "keywords": [
+    "cli",
+    "clean",
+    "manager",
+    "tool"
+  ],
   "license": "MIT",
   "dependencies": {
     "chalk": "^4.1.2",
-    "inquirer": "^8.2.6",
-    "ora": "^5.4.1",
+    "cli-table3": "^0.6.3",
     "commander": "^9.5.0",
-    "cli-table3": "^0.6.3"
+    "figlet": "^1.11.0",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
   }
 }

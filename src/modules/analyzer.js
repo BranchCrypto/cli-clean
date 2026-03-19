@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const { CLI_SOURCE_DIRS, formatSize } = require('../utils/constants');
 const logger = require('../utils/logger');
+const { t, tp } = require('../utils/i18n');
 
 /**
  * 分析 CLI 的关联文件和目录
@@ -20,10 +21,8 @@ function analyzeRelatedFiles(cliEntry) {
   const primaryPath = cliEntry.primaryPath;
   const source = cliEntry.source;
 
-  // 根据来源类型分析关联文件
   switch (source) {
     case 'npm': {
-      // NPM 全局包：查找 node_modules 中的包目录
       analyzeNpmRelated(cliEntry, related);
       break;
     }
@@ -44,16 +43,13 @@ function analyzeRelatedFiles(cliEntry) {
       break;
     }
     default: {
-      // 通用分析
       analyzeGenericRelated(cliEntry, related);
       break;
     }
   }
 
-  // 查找配置文件（通用）
   analyzeConfigFiles(name, related);
 
-  // 计算总大小
   const allPaths = [...related.directories, ...related.files];
   for (const p of allPaths) {
     try {
@@ -68,33 +64,30 @@ function analyzeNpmRelated(cliEntry, related) {
   const npmDir = path.join(process.env.APPDATA || '', 'npm');
   const nodeModulesDir = path.join(npmDir, 'node_modules');
 
-  // 尝试在 node_modules 中找到对应的包
   const possibleNames = [
     cliEntry.name,
     `@${cliEntry.name}`,
   ];
 
-  // 也可能是带 scope 的 npm 包
   for (const pName of possibleNames) {
     const pkgDir = path.join(nodeModulesDir, pName);
     if (fs.existsSync(pkgDir)) {
       related.directories.push({
         path: pkgDir,
-        label: 'NPM 包目录',
+        label: t('analyzer.npmPkgDir'),
         size: getDirectorySize(pkgDir),
       });
       break;
     }
   }
 
-  // npm 缓存
   const npmCacheDir = path.join(process.env.APPDATA || '', 'npm-cache');
   if (fs.existsSync(npmCacheDir)) {
     const cacheContent = path.join(npmCacheDir, '_content', 'v2');
     if (fs.existsSync(cacheContent)) {
       related.directories.push({
         path: npmCacheDir,
-        label: 'NPM 缓存（共享，谨慎删除）',
+        label: t('analyzer.npmCache'),
         size: getDirectorySize(npmCacheDir),
         shared: true,
       });
@@ -103,7 +96,6 @@ function analyzeNpmRelated(cliEntry, related) {
 }
 
 function analyzePipRelated(cliEntry, related) {
-  // Python 包通常在 Lib/site-packages 中
   const pythonRoot = path.dirname(path.dirname(cliEntry.primaryPath));
   const sitePackages = path.join(pythonRoot, 'Lib', 'site-packages');
 
@@ -117,7 +109,7 @@ function analyzePipRelated(cliEntry, related) {
           const fullPath = path.join(sitePackages, entry);
           related.directories.push({
             path: fullPath,
-            label: 'Python 包文件',
+            label: t('analyzer.pythonPkg'),
             size: getDirectorySize(fullPath),
           });
         }
@@ -125,12 +117,11 @@ function analyzePipRelated(cliEntry, related) {
     } catch { /* ignore */ }
   }
 
-  // pip 缓存
   const pipCacheDir = path.join(os.homedir(), 'AppData', 'Local', 'pip', 'cache');
   if (fs.existsSync(pipCacheDir)) {
     related.directories.push({
       path: pipCacheDir,
-      label: 'Pip 缓存（共享，谨慎删除）',
+      label: t('analyzer.pipCache'),
       size: getDirectorySize(pipCacheDir),
       shared: true,
     });
@@ -142,7 +133,7 @@ function analyzeDotnetRelated(cliEntry, related) {
   if (fs.existsSync(toolsDir)) {
     related.directories.push({
       path: toolsDir,
-      label: '.NET 工具目录（共享，谨慎删除）',
+      label: t('analyzer.dotnetTools'),
       size: getDirectorySize(toolsDir),
       shared: true,
     });
@@ -150,24 +141,22 @@ function analyzeDotnetRelated(cliEntry, related) {
 }
 
 function analyzeCargoRelated(cliEntry, related) {
-  // Cargo registry 缓存
   const registryDir = path.join(os.homedir(), '.cargo', 'registry');
   if (fs.existsSync(registryDir)) {
     related.directories.push({
       path: registryDir,
-      label: 'Cargo registry 缓存',
+      label: t('analyzer.cargoRegistry'),
       size: getDirectorySize(registryDir),
     });
   }
 }
 
 function analyzeGoRelated(cliEntry, related) {
-  // Go module cache
   const goCacheDir = path.join(os.homedir(), 'go', 'pkg', 'mod');
   if (fs.existsSync(goCacheDir)) {
     related.directories.push({
       path: goCacheDir,
-      label: 'Go module 缓存',
+      label: t('analyzer.goModuleCache'),
       size: getDirectorySize(goCacheDir),
     });
   }
@@ -176,7 +165,6 @@ function analyzeGoRelated(cliEntry, related) {
 function analyzeGenericRelated(cliEntry, related) {
   const name = cliEntry.name;
 
-  // 查找同名的常见关联目录
   const homeDir = os.homedir();
   const possibleDirs = [
     path.join(homeDir, `.${name}`),
@@ -204,7 +192,7 @@ function analyzeGenericRelated(cliEntry, related) {
         if (stat.isDirectory()) {
           related.directories.push({
             path: dir,
-            label: '配置/数据目录',
+            label: t('analyzer.configDataDir'),
             size: getDirectorySize(dir),
           });
         }
@@ -216,9 +204,7 @@ function analyzeGenericRelated(cliEntry, related) {
 function analyzeConfigFiles(name, related) {
   const homeDir = os.homedir();
 
-  // 常见的配置文件位置
   const possibleConfigs = [
-    // Unix-style dotfiles
     path.join(homeDir, `.${name}rc`),
     path.join(homeDir, `.${name}.json`),
     path.join(homeDir, `.${name}.yml`),
@@ -227,9 +213,7 @@ function analyzeConfigFiles(name, related) {
     path.join(homeDir, `.${name}.conf`),
     path.join(homeDir, `.${name}.config`),
     path.join(homeDir, `.${name}.cfg`),
-    // Windows-style
     path.join(homeDir, `.${name}.ini`),
-    // XDG config
     path.join(homeDir, '.config', name, 'config'),
     path.join(homeDir, '.config', name, 'config.json'),
     path.join(homeDir, '.config', name, 'config.yml'),
@@ -242,7 +226,7 @@ function analyzeConfigFiles(name, related) {
         if (stat.isFile()) {
           related.configPaths.push({
             path: configPath,
-            label: '配置文件',
+            label: t('analyzer.configFile'),
             size: stat.size,
           });
         }
@@ -270,11 +254,11 @@ function getDirectorySize(dirPath) {
           totalSize += fs.statSync(fullPath).size;
         }
       } catch {
-        // 跳过无法访问的文件
+        // skip inaccessible files
       }
     }
   } catch {
-    // 跳过无法访问的目录
+    // skip inaccessible directories
   }
   return totalSize;
 }
@@ -290,12 +274,12 @@ function getRelatedSummary(related) {
   const configCount = related.configPaths.length;
   const totalRelatedSize = related.totalSize;
 
-  if (dirCount > 0) parts.push(`${dirCount} 个关联目录`);
-  if (fileCount > 0) parts.push(`${fileCount} 个关联文件`);
-  if (configCount > 0) parts.push(`${configCount} 个配置文件`);
-  if (totalRelatedSize > 0) parts.push(`约 ${formatSize(totalRelatedSize)}`);
+  if (dirCount > 0) parts.push(tp('analyzer.relatedDirs', dirCount));
+  if (fileCount > 0) parts.push(tp('analyzer.relatedFiles', fileCount));
+  if (configCount > 0) parts.push(tp('analyzer.configFiles', configCount));
+  if (totalRelatedSize > 0) parts.push(t('analyzer.approxSize', { size: formatSize(totalRelatedSize) }));
 
-  return parts.length > 0 ? parts.join(', ') : '未发现关联文件';
+  return parts.length > 0 ? parts.join(', ') : t('analyzer.noRelated');
 }
 
 module.exports = {
